@@ -1,0 +1,103 @@
+name: velistream
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      retries: 30
+
+  topics:
+    image: redpandadata/redpanda:v24.2.7
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    # At least 24 h of retention: if ClickHouse falls over, messages wait for it.
+    command:
+      - >
+        rpk -X brokers=redpanda:9092 topic create velib.station_status -p 3 -c retention.ms=172800000 || true;
+        rpk -X brokers=redpanda:9092 topic create velib.dlq -p 1 -c retention.ms=604800000 || true
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    ports:
+      - "8123:8123"
+    environment:
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      retries: 30
+
+  producer:
+    build: .
+    command: ["uv", "run", "--no-dev", "python", "-m", "producer", "--interval", "60"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # A fresh install needs the station reference right away, not at the next daily run.
+  bootstrap:
+    build: .
+    restart: "no"
+    command: ["uv", "run", "--no-dev", "dagster", "asset", "materialize", "-m", "orchestration", "--select", "station_information"]
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  dagster:
+    build: .
+    command: ["uv", "run", "--no-dev", "dagster", "dev", "-m", "orchestration", "-h", "0.0.0.0", "-p", "3000"]
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      DAGSTER_HOME: /app/.dagster
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource 4.5.0
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+
+volumes:
+  redpanda-data:
+  clickhouse-data:
