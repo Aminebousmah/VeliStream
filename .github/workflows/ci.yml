@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  dbt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: ClickHouse éphémère
+        run: |
+          docker run -d --name clickhouse -p 8123:8123 \
+            -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
+            -v "$PWD/clickhouse/init:/docker-entrypoint-initdb.d:ro" \
+            clickhouse/clickhouse-server:24.8
+          until curl -sf http://localhost:8123/ping; do sleep 2; done
+          until docker exec clickhouse clickhouse-client -q "exists table velib.ingest_log" | grep -q 1; do sleep 2; done
+      - run: docker exec -i clickhouse clickhouse-client --multiquery < tests/fixtures/ci_data.sql
+      - run: uv run dbt build --profiles-dir .
+        working-directory: dbt
+      - run: uv run python tests/check_marts.py
