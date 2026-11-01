@@ -1,0 +1,241 @@
+{
+  "uid": "velistream",
+  "title": "VéliStream",
+  "timezone": "Europe/Paris",
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Vélos disponibles sur le réseau",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "with latest as (select station_id, argMax(num_bikes_available, last_reported) as bikes from velib.raw_station_status where last_reported > now() - interval 1 day group by station_id) select sum(bikes) as velos from latest"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Âge du dernier message (secondes)",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "select dateDiff('second', max(ingested_at), now()) as age from velib.ingest_log"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Latence collecte → ClickHouse",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 5
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeseries",
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "select toStartOfFiveMinutes(fetched_at) as time, quantileExactWeighted(0.5)(dateDiff('second', fetched_at, ingested_at), messages) as p50, quantileExactWeighted(0.95)(dateDiff('second', fetched_at, ingested_at), messages) as p95 from velib.ingest_log where $__timeFilter(fetched_at) group by time order by time"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Stations (couleur : vélos disponibles)",
+      "type": "geomap",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 14
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "options": {
+        "view": {
+          "id": "coords",
+          "lat": 48.8566,
+          "lon": 2.3522,
+          "zoom": 11
+        },
+        "basemap": {
+          "type": "osm-standard",
+          "name": "OpenStreetMap"
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Stations",
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 5,
+                  "min": 4,
+                  "max": 8
+                },
+                "color": {
+                  "field": "velos",
+                  "fixed": "blue"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-BlYlRd"
+          },
+          "min": 0
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "with latest as (select station_id, argMax(num_bikes_available, last_reported) as velos from velib.raw_station_status where last_reported > now() - interval 1 day group by station_id) select i.name as name, i.lat as lat, i.lon as lon, l.velos as velos from latest as l inner join velib.raw_station_information as i final on l.station_id = i.station_id"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Vélos disponibles sur tout le réseau",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "timeseries",
+          "editorType": "sql",
+          "format": 0,
+          "rawSql": "select bucket_utc as time, mechanical_bikes as mecaniques, electric_bikes as electriques from marts.mart_network_kpis where $__timeFilter(bucket_utc) order by time"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Stations le plus souvent vides, 7 jours",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "editorType": "sql",
+          "format": 1,
+          "rawSql": "select name as station, count() as episodes, sum(duration_minutes) as minutes_vide from marts.mart_station_empty_full where state = 'empty' and ended_at > now() - interval 7 day group by name order by minutes_vide desc limit 15"
+        }
+      ]
+    }
+  ]
+}

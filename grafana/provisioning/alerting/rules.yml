@@ -1,0 +1,63 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: pipeline
+    folder: Alertes pipeline
+    interval: 1m
+    rules:
+      - uid: pipeline-frozen
+        title: Pipeline figé depuis plus de 5 minutes
+        condition: B
+        for: 0s
+        noDataState: Alerting
+        execErrState: Alerting
+        annotations:
+          summary: Aucun message reçu par ClickHouse depuis plus de 5 minutes.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: clickhouse
+            model:
+              refId: A
+              editorType: sql
+              queryType: table
+              format: 1
+              rawSql: select dateDiff('second', max(ingested_at), now()) as age from velib.ingest_log
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [300] }
+      - uid: dlq-abnormal
+        title: Taux de messages en DLQ anormal
+        condition: B
+        for: 5m
+        noDataState: OK
+        execErrState: Alerting
+        annotations:
+          summary: Plus de 1 % des messages de la dernière heure partent en DLQ.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: clickhouse
+            model:
+              refId: A
+              editorType: sql
+              queryType: table
+              format: 1
+              rawSql: >-
+                select
+                  (select count() from velib.dlq_messages where received_at > now() - interval 1 hour)
+                  / greatest(1, (select sum(messages) from velib.ingest_log where ingested_at > now() - interval 1 hour)) as ratio
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.01] }
