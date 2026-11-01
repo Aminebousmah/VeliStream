@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: velib
+    schema: velib
+    tables:
+      - name: raw_station_status
+      - name: raw_station_information
+      - name: dlq_messages
+      - name: ingest_log

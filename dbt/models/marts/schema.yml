@@ -1,0 +1,24 @@
+version: 2
+
+models:
+  - name: mart_station_hourly
+    columns:
+      - name: station_id
+        tests: [not_null]
+      - name: hour_utc
+        tests: [not_null]
+  - name: mart_station_empty_full
+    columns:
+      - name: state
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["empty", "full"]
+  - name: mart_network_kpis
+    columns:
+      - name: bucket_utc
+        tests: [not_null, unique]
+  - name: mart_pipeline_health
+    columns:
+      - name: bucket_utc
+        tests: [not_null, unique]
